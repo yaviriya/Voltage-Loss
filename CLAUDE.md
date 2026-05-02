@@ -8,7 +8,7 @@
 - รับ input ไฟล์ Voltage, Current, Power Factor, Normal Voltage
 - คำนวณ V_average Phase A, Phase B, Phase C จาก V_normal(Normal Voltage)
 - คำนวณหา V_loss จาก logic ถ้า Voltage < (V_average*0.975) ให้ใช้ (V_average*0.975)-Voltage ถ้าไม่ให้เป็น 0 ทำเหมือนกันทั้ง Phase A, Phase B, Phase C
-- คำนวณ P_loss Phase A, Phase B, Phase C จาก V_loss*Current*Power Factor ทำแบบเดียวกันทั้ง 3 เฟส
+- คำนวณ P_loss Phase A, Phase B, Phase C จาก (V_loss*Current*Power Factor*CT_Ratio)/4000 ทำแบบเดียวกันทั้ง 3 เฟส
 - คำนวณ P_loss Total จาก P_loss Phase A + P_loss Phase B + P_loss Phase C
 
 ## โครงสร้างโปรเจค
