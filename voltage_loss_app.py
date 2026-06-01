@@ -171,7 +171,7 @@ class VoltageAnalyzerApp:
         """เปิดหน้าต่างให้เลือกไฟล์ Excel"""
         file_path = filedialog.askopenfilename(
             title=f"Select Excel File {index+1}",
-            filetypes=[("Excel Files", "*.xlsx"), ("All Files", "*.*")]
+            filetypes=[("Excel Files", "*.xlsx *.xls"), ("All Files", "*.*")]
         )
         if file_path:
             self.input_paths[index] = file_path
@@ -185,10 +185,11 @@ class VoltageAnalyzerApp:
             return True
         return False
 
-    def find_header_row(self, worksheet):
+    def find_header_row(self, rows):
         """หาแถวที่เป็นหัวตาราง โดยหาแถวแรกที่คอลัมน์ A มีรูปแบบวันที่"""
-        for row_idx, row in enumerate(worksheet.iter_rows(min_row=1), start=1):
-            cell_a_value = str(row[0].value).strip() if row[0].value else ""
+        for row_idx, row in enumerate(rows, start=1):
+            first = row[0] if row else None
+            cell_a_value = str(first).strip() if first is not None else ""
             if self.is_valid_datetime(cell_a_value):
                 if row_idx > 1:
                     return row_idx - 1
@@ -202,11 +203,45 @@ class VoltageAnalyzerApp:
             return False
         return any(c.isdigit() for c in text) and ('/' in text or '-' in text)
 
-    def read_excel_data(self, file_path):
-        """อ่านข้อมูลจากไฟล์ Excel"""
+    def load_rows(self, file_path):
+        """โหลดทุกแถวจากไฟล์ Excel เป็น list ของ list (ค่าของแต่ละเซลล์)
+
+        เลือก engine ตามนามสกุลไฟล์:
+        - .xls            → xlrd (รูปแบบเก่า)
+        - .xlsx / .xlsm   → openpyxl (รูปแบบใหม่)
+        เซลล์ชนิดวันที่ใน .xls จะถูกแปลงเป็นข้อความ dd/mm/yyyy HH.MM
+        เพื่อให้ตัวอ่านวันที่ (ที่ออกแบบไว้สำหรับข้อความ) ใช้งานได้
+        """
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext == ".xls":
+            import xlrd
+            book = xlrd.open_workbook(file_path)
+            sheet = book.sheet_by_index(0)
+            rows = []
+            for r in range(sheet.nrows):
+                row = []
+                for c in range(sheet.ncols):
+                    cell = sheet.cell(r, c)
+                    if cell.ctype == xlrd.XL_CELL_DATE:
+                        dt = xlrd.xldate_as_datetime(cell.value, book.datemode)
+                        row.append(dt.strftime("%d/%m/%Y %H.%M"))
+                    else:
+                        row.append(cell.value)
+                rows.append(row)
+            return rows
+
         wb = openpyxl.load_workbook(file_path)
         ws = wb.active
-        header_row = self.find_header_row(ws)
+        return [list(row) for row in ws.iter_rows(values_only=True)]
+
+    def read_excel_data(self, file_path):
+        """อ่านข้อมูลจากไฟล์ Excel (รองรับทั้ง .xlsx และ .xls)"""
+        try:
+            rows = self.load_rows(file_path)
+        except Exception as e:
+            messagebox.showerror("Error", f"เปิดไฟล์ไม่ได้: {os.path.basename(file_path)}\n{e}")
+            return None
+        header_row = self.find_header_row(rows)
 
         if header_row is None:
             messagebox.showwarning("Warning", f"ไม่พบแถวหัวตารางในไฟล์ {os.path.basename(file_path)}")
@@ -214,10 +249,12 @@ class VoltageAnalyzerApp:
 
         data = {}
         is_thai_date = False
+        # ข้อมูลเริ่มที่แถวถัดจากหัวตาราง (header_row เป็นเลขแถวแบบ 1-based)
+        data_rows = rows[header_row:]
 
         # ตรวจสอบแถวแรกที่มีข้อมูลวันที่เพื่อดูว่าเป็นวันที่ไทยหรือไม่
-        for row in ws.iter_rows(min_row=header_row + 1):
-            raw_value = str(row[0].value) if row[0].value is not None else ""
+        for row in data_rows:
+            raw_value = str(row[0]) if row and row[0] is not None else ""
             if self.is_valid_datetime(raw_value):
                 clean_value = raw_value.replace('\xa0', '').strip()
                 if ' ' in clean_value:
@@ -242,9 +279,9 @@ class VoltageAnalyzerApp:
                 break
 
         # อ่านข้อมูลทั้งหมด
-        for row in ws.iter_rows(min_row=header_row + 1):
+        for row in data_rows:
             try:
-                raw_value = str(row[0].value) if row[0].value is not None else ""
+                raw_value = str(row[0]) if row and row[0] is not None else ""
                 if not self.is_valid_datetime(raw_value):
                     continue
 
@@ -314,11 +351,11 @@ class VoltageAnalyzerApp:
                         except ValueError:
                             dt = datetime.strptime(std_date_str, "%d/%m/%Y")
 
-                data[dt] = [cell.value for cell in row]
+                data[dt] = list(row)
             except Exception:
                 continue
 
-        return data, header_row, ws
+        return data, header_row, None
 
     def compute_v_regression(self, normal_voltage_data, normal_current_data):
         """ฝึกโมเดล Linear Regression 3 ตัว (เฟส A, B, C) จากข้อมูลช่วงปกติ

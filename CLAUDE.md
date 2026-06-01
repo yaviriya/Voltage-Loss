@@ -44,6 +44,7 @@ voltage_loss/
 | Python 3.12 | ภาษาหลัก |
 | tkinter / ttk | สร้างหน้าจอ GUI |
 | openpyxl | อ่าน/เขียนไฟล์ Excel (.xlsx) พร้อมใส่สีเซลล์ |
+| xlrd | อ่านไฟล์ Excel รูปแบบเก่า (.xls) — เวอร์ชัน 2.x รองรับเฉพาะ .xls |
 | numpy | จัดการ array สำหรับ regression |
 | scikit-learn | `LinearRegression` + ค่า R-Square |
 | PyInstaller | build เป็นไฟล์ `.exe` แจกจ่าย |
@@ -51,6 +52,7 @@ voltage_loss/
 ## สิ่งที่ทำเสร็จแล้ว
 
 - GUI รับ 5 ไฟล์: แยกกลุ่ม **Normal Files** (Normal Voltage, Normal Current) กับ **Calculation Files** (Voltage, Current, Power Factor)
+- รองรับไฟล์ทั้ง `.xlsx` (openpyxl) และ `.xls` (xlrd) ผ่านตัวโหลดกลาง `load_rows()`
 - CT Ratio เป็น Radio Button แนวนอน: 100/5→20, 150/5→30, 250/5→50, 400/5→80
 - คำนวณ V_regression 3 เฟสด้วย Linear Regression + แสดง R-Square ของแต่ละเฟส
 - คำนวณ V_loss, P_loss แยก 3 เฟส และ P_loss Total
@@ -82,7 +84,7 @@ pyinstaller --onefile --windowed --name VoltageLoss --icon "logo/wave.ico" --add
 ## Environment ที่ติดตั้งไว้
 
 - Python 3.12 (`C:\Users\amari\AppData\Local\Programs\Python\Python312`)
-- numpy 1.26.4, scikit-learn 1.5.2, scipy 1.14.1, openpyxl 3.1.5
+- numpy 1.26.4, scikit-learn 1.5.2, scipy 1.14.1, openpyxl 3.1.5, xlrd 2.0.2
 - PyInstaller 6.12.0
 - หมายเหตุ: เครื่องนี้มี torch (cu121), pandas, matplotlib, opencv ติดตั้งอยู่ด้วย แต่แอปนี้ไม่ได้ใช้ (ต้อง exclude ตอน build)
 
