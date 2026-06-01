@@ -1,23 +1,46 @@
 import os
+import sys
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from datetime import datetime, time, date, timedelta
 import openpyxl
 from openpyxl.styles import PatternFill
 from collections import defaultdict
+import numpy as np
+from sklearn.linear_model import LinearRegression
 
-# ใช้ตำแหน่งของสคริปต์เป็น base path เพื่อให้แอปทำงานได้ทุกเครื่อง
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# ใช้ตำแหน่งของแอปเป็น base path เพื่อให้ทำงานได้ทุกเครื่อง
+# - กรณี build เป็น .exe (PyInstaller) ใช้โฟลเดอร์ของไฟล์ .exe
+# - กรณีรันเป็นสคริปต์ปกติ ใช้โฟลเดอร์ของไฟล์ .py
+if getattr(sys, 'frozen', False):
+    SCRIPT_DIR = os.path.dirname(sys.executable)
+else:
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def resource_path(rel_path):
+    """หาพาธของไฟล์ทรัพยากร (เช่น ไอคอน) ให้ทำงานได้ทั้งตอนรัน .py และ .exe
+
+    ตอน build แบบ PyInstaller --onefile ไฟล์ที่ฝังไว้จะถูกแตกไปที่ sys._MEIPASS
+    """
+    base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, rel_path)
 
 
 class VoltageAnalyzerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Voltage Loss Calculation")
-        self.root.geometry("650x650")
+        self.root.geometry("720x860")
 
-        # ตัวแปรเก็บพาธของไฟล์ (Voltage, Current, Power Factor, Normal Voltage)
-        self.input_paths = [None, None, None, None]
+        # ตั้งไอคอนหน้าต่างแอป (ถ้าหาไฟล์ไม่เจอก็ข้ามไป ไม่ให้แอป crash)
+        try:
+            self.root.iconbitmap(resource_path("wave.ico"))
+        except Exception:
+            pass
+
+        # ตัวแปรเก็บพาธของไฟล์ (Voltage, Current, Power Factor, Normal Voltage, Normal Current)
+        self.input_paths = [None, None, None, None, None]
         self.multiply_factor_var = tk.StringVar(value="30")  # CT Ratio เริ่มต้น 30
 
         # ตัวแปรสำหรับเก็บผลรวมของ P Loss แยกตามสี (Peak / Off-Peak / Holiday)
@@ -61,26 +84,37 @@ class VoltageAnalyzerApp:
 
     def create_widgets(self):
         """สร้าง UI elements"""
-        # สร้างเฟรมสำหรับเลือกไฟล์
-        file_frame = ttk.LabelFrame(self.root, text="Upload Excel Files")
-        file_frame.pack(fill="x", padx=10, pady=10)
+        # file_path_vars เก็บตาม index ของ input_paths
+        # (0=Voltage, 1=Current, 2=Power Factor, 3=Normal Voltage, 4=Normal Current)
+        self.file_path_vars = [tk.StringVar() for _ in range(5)]
 
-        # สร้างปุ่มและแสดงพาธของไฟล์ที่เลือก (4 ไฟล์)
-        file_labels = ["Voltage", "Current", "Power Factor", "Normal Voltage"]
-        self.file_path_vars = [tk.StringVar() for _ in range(4)]
+        def build_file_rows(parent, items):
+            """สร้างแถวเลือกไฟล์: items = [(label, index), ...]"""
+            for row, (label, idx) in enumerate(items):
+                ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=5, pady=5)
+                ttk.Entry(parent, textvariable=self.file_path_vars[idx], width=50).grid(row=row, column=1, padx=5, pady=5)
+                ttk.Button(parent, text="Browse...", command=lambda i=idx: self.browse_file(i)).grid(row=row, column=2, padx=5, pady=5)
 
-        for i, label in enumerate(file_labels):
-            ttk.Label(file_frame, text=label).grid(row=i, column=0, sticky="w", padx=5, pady=5)
-            ttk.Entry(file_frame, textvariable=self.file_path_vars[i], width=50).grid(row=i, column=1, padx=5, pady=5)
-            ttk.Button(file_frame, text="Browse...", command=lambda idx=i: self.browse_file(idx)).grid(row=i, column=2, padx=5, pady=5)
+        # เฟรมไฟล์ Normal (ใช้ฝึกโมเดล regression) — อยู่ด้านบน
+        normal_frame = ttk.LabelFrame(self.root, text="Normal Files")
+        normal_frame.pack(fill="x", padx=10, pady=(10, 20))
+        build_file_rows(normal_frame, [("Normal Voltage", 3), ("Normal Current", 4)])
 
-        # สร้างเฟรมสำหรับตั้งค่าพารามิเตอร์
+        # เฟรมไฟล์ที่ใช้คำนวณ — อยู่ด้านล่าง (เว้นระยะห่างจากกลุ่ม Normal)
+        measure_frame = ttk.LabelFrame(self.root, text="Calculation Files")
+        measure_frame.pack(fill="x", padx=10, pady=(0, 10))
+        build_file_rows(measure_frame, [("Voltage", 0), ("Current", 1), ("Power Factor", 2)])
+
+        # สร้างเฟรมสำหรับตั้งค่าพารามิเตอร์ CT (Radio Button แนวนอน)
         param_frame = ttk.LabelFrame(self.root, text="CT")
         param_frame.pack(fill="x", padx=10, pady=10)
 
-        # เพิ่มช่องสำหรับกรอกค่า CT Ratio (multiply_factor)
-        ttk.Label(param_frame, text="Ratio:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
-        ttk.Entry(param_frame, textvariable=self.multiply_factor_var, width=10).grid(row=0, column=1, sticky="w", padx=5, pady=5)
+        # ตัวเลือก CT: (ป้ายที่แสดง, ค่า CT_Ratio)
+        ct_options = [("100/5", "20"), ("150/5", "30"), ("250/5", "50"), ("400/5", "80")]
+        for col, (label, value) in enumerate(ct_options):
+            ttk.Radiobutton(
+                param_frame, text=label, value=value, variable=self.multiply_factor_var
+            ).grid(row=0, column=col, sticky="w", padx=15, pady=5)
 
         # สร้างปุ่มเริ่มการคำนวณ
         ttk.Button(self.root, text="Execute", command=self.process_files).pack(pady=20)
@@ -95,27 +129,40 @@ class VoltageAnalyzerApp:
         self.green_p_loss_var = tk.StringVar()
         self.blue_p_loss_var = tk.StringVar()
         self.total_p_loss_var = tk.StringVar()
+        self.r2_a_var = tk.StringVar()
+        self.r2_b_var = tk.StringVar()
+        self.r2_c_var = tk.StringVar()
 
         # แสดงพาธของไฟล์ผลลัพธ์
         ttk.Label(result_frame, text="Output File:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
         ttk.Entry(result_frame, textvariable=self.output_path_var, width=70, state="readonly").grid(row=0, column=1, padx=5, pady=5)
 
+        # แสดงค่า R-Square ของแต่ละโมเดล V_regression (ยิ่งใกล้ 1 ยิ่งดี)
+        ttk.Label(result_frame, text="R² Phase A:").grid(row=1, column=0, sticky="w", padx=5, pady=5)
+        ttk.Entry(result_frame, textvariable=self.r2_a_var, width=15, state="readonly").grid(row=1, column=1, sticky="w", padx=5, pady=5)
+
+        ttk.Label(result_frame, text="R² Phase B:").grid(row=2, column=0, sticky="w", padx=5, pady=5)
+        ttk.Entry(result_frame, textvariable=self.r2_b_var, width=15, state="readonly").grid(row=2, column=1, sticky="w", padx=5, pady=5)
+
+        ttk.Label(result_frame, text="R² Phase C:").grid(row=3, column=0, sticky="w", padx=5, pady=5)
+        ttk.Entry(result_frame, textvariable=self.r2_c_var, width=15, state="readonly").grid(row=3, column=1, sticky="w", padx=5, pady=5)
+
         # แสดงผลรวมของ P Loss แยกตามสี
-        ttk.Label(result_frame, text="P Loss Peak:").grid(row=1, column=0, sticky="w", padx=5, pady=5)
-        ttk.Entry(result_frame, textvariable=self.red_p_loss_var, width=15, state="readonly").grid(row=1, column=1, sticky="w", padx=5, pady=5)
-        ttk.Label(result_frame, text="kWh").grid(row=1, column=1, sticky="w", padx=(120, 5), pady=5)
-
-        ttk.Label(result_frame, text="P Loss Off-Peak:").grid(row=2, column=0, sticky="w", padx=5, pady=5)
-        ttk.Entry(result_frame, textvariable=self.green_p_loss_var, width=15, state="readonly").grid(row=2, column=1, sticky="w", padx=5, pady=5)
-        ttk.Label(result_frame, text="kWh").grid(row=2, column=1, sticky="w", padx=(120, 5), pady=5)
-
-        ttk.Label(result_frame, text="P Loss Holiday:").grid(row=3, column=0, sticky="w", padx=5, pady=5)
-        ttk.Entry(result_frame, textvariable=self.blue_p_loss_var, width=15, state="readonly").grid(row=3, column=1, sticky="w", padx=5, pady=5)
-        ttk.Label(result_frame, text="kWh").grid(row=3, column=1, sticky="w", padx=(120, 5), pady=5)
-
-        ttk.Label(result_frame, text="Total P Loss:").grid(row=4, column=0, sticky="w", padx=5, pady=5)
-        ttk.Entry(result_frame, textvariable=self.total_p_loss_var, width=15, state="readonly").grid(row=4, column=1, sticky="w", padx=5, pady=5)
+        ttk.Label(result_frame, text="P Loss Peak:").grid(row=4, column=0, sticky="w", padx=5, pady=5)
+        ttk.Entry(result_frame, textvariable=self.red_p_loss_var, width=15, state="readonly").grid(row=4, column=1, sticky="w", padx=5, pady=5)
         ttk.Label(result_frame, text="kWh").grid(row=4, column=1, sticky="w", padx=(120, 5), pady=5)
+
+        ttk.Label(result_frame, text="P Loss Off-Peak:").grid(row=5, column=0, sticky="w", padx=5, pady=5)
+        ttk.Entry(result_frame, textvariable=self.green_p_loss_var, width=15, state="readonly").grid(row=5, column=1, sticky="w", padx=5, pady=5)
+        ttk.Label(result_frame, text="kWh").grid(row=5, column=1, sticky="w", padx=(120, 5), pady=5)
+
+        ttk.Label(result_frame, text="P Loss Holiday:").grid(row=6, column=0, sticky="w", padx=5, pady=5)
+        ttk.Entry(result_frame, textvariable=self.blue_p_loss_var, width=15, state="readonly").grid(row=6, column=1, sticky="w", padx=5, pady=5)
+        ttk.Label(result_frame, text="kWh").grid(row=6, column=1, sticky="w", padx=(120, 5), pady=5)
+
+        ttk.Label(result_frame, text="Total P Loss:").grid(row=7, column=0, sticky="w", padx=5, pady=5)
+        ttk.Entry(result_frame, textvariable=self.total_p_loss_var, width=15, state="readonly").grid(row=7, column=1, sticky="w", padx=5, pady=5)
+        ttk.Label(result_frame, text="kWh").grid(row=7, column=1, sticky="w", padx=(120, 5), pady=5)
 
         # สร้างปุ่มออกจากโปรแกรม
         ttk.Button(self.root, text="Exit", command=self.root.destroy).pack(pady=10)
@@ -273,35 +320,71 @@ class VoltageAnalyzerApp:
 
         return data, header_row, ws
 
-    def compute_v_average(self, normal_voltage_data):
-        """คำนวณค่าเฉลี่ย V Phase A, B, C จากไฟล์ Normal Voltage
+    def compute_v_regression(self, normal_voltage_data, normal_current_data):
+        """ฝึกโมเดล Linear Regression 3 ตัว (เฟส A, B, C) จากข้อมูลช่วงปกติ
 
-        สมมติว่าคอลัมน์ลำดับ 1, 2, 3 ของแต่ละแถวคือ V Phase A, B, C ตามลำดับ
-        (ลำดับเดียวกับไฟล์ Voltage) — datetime ของไฟล์นี้ไม่จำเป็นต้องตรงกับ
-        ไฟล์อื่น เพราะใช้แค่หาค่าเฉลี่ยของแต่ละคอลัมน์
+        จับคู่แถวจากไฟล์ Normal Voltage และ Normal Current ตาม datetime ที่ตรงกัน
+        โดยสมมติว่าคอลัมน์ลำดับ 1, 2, 3 ของแต่ละไฟล์คือเฟส A, B, C ตามลำดับ
+        ดังนั้นแต่ละแถวข้อมูลฝึกคือ [V_a, V_b, V_c, I_a, I_b, I_c]
+
+        ตัวแปรต้น (X) ของแต่ละเฟส:
+            A: [V_b, V_c, I_a, I_b, I_c]   (ทำนาย V_a)
+            B: [V_a, V_c, I_a, I_b, I_c]   (ทำนาย V_b)
+            C: [V_a, V_b, I_a, I_b, I_c]   (ทำนาย V_c)
+
+        คืนค่า (models, r2s):
+            models[ph] = LinearRegression ที่ฝึกแล้ว (ph เป็น 'A'/'B'/'C')
+            r2s[ph]    = ค่า R-Square ของโมเดลนั้น
+        ถ้าข้อมูลไม่พอจะคืน (None, None)
         """
-        sums = [0.0, 0.0, 0.0]
-        counts = [0, 0, 0]
-        for row in normal_voltage_data.values():
-            for i in range(3):
-                idx = i + 1
-                if idx >= len(row):
-                    continue
-                val = row[idx]
-                if val is None:
-                    continue
-                try:
-                    sums[i] += float(val)
-                    counts[i] += 1
-                except (ValueError, TypeError):
-                    continue
-        return [sums[i] / counts[i] if counts[i] > 0 else 0.0 for i in range(3)]
+        rows = []
+        for dt in sorted(set(normal_voltage_data) & set(normal_current_data)):
+            v = normal_voltage_data[dt]
+            c = normal_current_data[dt]
+            try:
+                v_a, v_b, v_c = float(v[1]), float(v[2]), float(v[3])
+                i_a, i_b, i_c = float(c[1]), float(c[2]), float(c[3])
+            except (ValueError, TypeError, IndexError):
+                continue
+            rows.append((v_a, v_b, v_c, i_a, i_b, i_c))
+
+        # ต้องมีจำนวนแถวมากกว่าจำนวนตัวแปรต้น (5) จึง regression ได้อย่างมีความหมาย
+        if len(rows) <= 5:
+            return None, None
+
+        arr = np.array(rows, dtype=float)
+        v_a, v_b, v_c = arr[:, 0], arr[:, 1], arr[:, 2]
+        i_a, i_b, i_c = arr[:, 3], arr[:, 4], arr[:, 5]
+
+        feature_map = {
+            'A': np.column_stack([v_b, v_c, i_a, i_b, i_c]),
+            'B': np.column_stack([v_a, v_c, i_a, i_b, i_c]),
+            'C': np.column_stack([v_a, v_b, i_a, i_b, i_c]),
+        }
+        target_map = {'A': v_a, 'B': v_b, 'C': v_c}
+
+        models, r2s = {}, {}
+        for ph in ('A', 'B', 'C'):
+            model = LinearRegression()
+            model.fit(feature_map[ph], target_map[ph])
+            models[ph] = model
+            r2s[ph] = model.score(feature_map[ph], target_map[ph])
+        return models, r2s
+
+    def predict_v_regression(self, model, features):
+        """ทำนายค่า V_regression ของแถวหนึ่งจากโมเดลที่ฝึกไว้
+
+        features ต้องเรียงลำดับเหมือนตอนฝึก ถ้ามีค่าใดเป็น None จะคืน None
+        """
+        if model is None or any(f is None for f in features):
+            return None
+        return float(model.intercept_ + np.dot(model.coef_, features))
 
     def process_files(self):
         """ประมวลผลไฟล์ Excel ทั้งหมด"""
-        # ตรวจสอบว่าได้เลือกไฟล์ครบทั้ง 4 ไฟล์หรือไม่
+        # ตรวจสอบว่าได้เลือกไฟล์ครบทั้ง 5 ไฟล์หรือไม่
         if None in self.input_paths:
-            messagebox.showerror("Error", "โปรดเลือกให้ครบทั้ง 4 ไฟล์เพื่อทำการคำนวณ")
+            messagebox.showerror("Error", "โปรดเลือกให้ครบทั้ง 5 ไฟล์เพื่อทำการคำนวณ")
             return
 
         try:
@@ -325,22 +408,22 @@ class VoltageAnalyzerApp:
             data, _, _ = result
             all_data.append(data)
 
-        # อ่านไฟล์ Normal Voltage แยก เพื่อคำนวณค่าเฉลี่ย
-        normal_result = self.read_excel_data(self.input_paths[3])
-        if normal_result is None:
+        # อ่านไฟล์ Normal Voltage และ Normal Current เพื่อฝึกโมเดล regression
+        normal_volt_result = self.read_excel_data(self.input_paths[3])
+        if normal_volt_result is None:
             messagebox.showerror("Error", "ไม่สามารถอ่านไฟล์ Normal Voltage ได้")
             return
-        normal_data, _, _ = normal_result
-        v_avg_a, v_avg_b, v_avg_c = self.compute_v_average(normal_data)
-
-        if v_avg_a == 0 and v_avg_b == 0 and v_avg_c == 0:
-            messagebox.showerror("Error", "ไฟล์ Normal Voltage ไม่มีข้อมูลสำหรับคำนวณค่าเฉลี่ย")
+        normal_curr_result = self.read_excel_data(self.input_paths[4])
+        if normal_curr_result is None:
+            messagebox.showerror("Error", "ไม่สามารถอ่านไฟล์ Normal Current ได้")
             return
+        normal_volt_data, _, _ = normal_volt_result
+        normal_curr_data, _, _ = normal_curr_result
 
-        # threshold = V_avg * 0.975
-        threshold_a = v_avg_a * 0.975
-        threshold_b = v_avg_b * 0.975
-        threshold_c = v_avg_c * 0.975
+        models, r2s = self.compute_v_regression(normal_volt_data, normal_curr_data)
+        if models is None:
+            messagebox.showerror("Error", "ข้อมูลช่วงปกติ (Normal Voltage/Current) ไม่พอสำหรับฝึกโมเดล regression")
+            return
 
         # รวมข้อมูลจากทั้ง 3 ไฟล์หลัก
         merged_data = defaultdict(list)
@@ -368,7 +451,7 @@ class VoltageAnalyzerApp:
             "V Phase A", "V Phase B", "V Phase C",
             "I Phase A", "I Phase B", "I Phase C",
             "Power Factor",
-            "V Avg A", "V Avg B", "V Avg C",
+            "V Reg A", "V Reg B", "V Reg C",
             "V Loss A", "V Loss B", "V Loss C",
             "P Loss A", "P Loss B", "P Loss C",
             "P Loss Total",
@@ -416,15 +499,22 @@ class VoltageAnalyzerApp:
             i_c = get_float(i_c_col - 1)
             pf = get_float(pf_col - 1)
 
-            # V Loss ต่อเฟส: ถ้า V < V_avg*0.975 → V_avg*0.975 - V, ไม่งั้น 0
-            def calc_v_loss(v, threshold):
-                if v is None:
+            # ทำนาย V_regression ของแต่ละเฟสจากตัวแปรต้นของแถวนี้
+            # (ลำดับ feature ต้องตรงกับตอนฝึกใน compute_v_regression)
+            v_reg_a = self.predict_v_regression(models['A'], [v_b, v_c, i_a, i_b, i_c])
+            v_reg_b = self.predict_v_regression(models['B'], [v_a, v_c, i_a, i_b, i_c])
+            v_reg_c = self.predict_v_regression(models['C'], [v_a, v_b, i_a, i_b, i_c])
+
+            # V Loss ต่อเฟส: ถ้า V < V_reg*0.975 → V_reg*0.975 - V, ไม่งั้น 0
+            def calc_v_loss(v, v_reg):
+                if v is None or v_reg is None:
                     return 0.0
+                threshold = v_reg * 0.975
                 return threshold - v if v < threshold else 0.0
 
-            v_loss_a = calc_v_loss(v_a, threshold_a)
-            v_loss_b = calc_v_loss(v_b, threshold_b)
-            v_loss_c = calc_v_loss(v_c, threshold_c)
+            v_loss_a = calc_v_loss(v_a, v_reg_a)
+            v_loss_b = calc_v_loss(v_b, v_reg_b)
+            v_loss_c = calc_v_loss(v_c, v_reg_c)
 
             # P Loss ต่อเฟส: V_loss * I * PF * CT_Ratio / 4000
             def calc_p_loss(v_loss, i_val):
@@ -441,9 +531,9 @@ class VoltageAnalyzerApp:
             while len(row_data) <= max_input_index:
                 row_data.append(None)
 
-            # ต่อท้าย: V Avg A/B/C, V Loss A/B/C, P Loss A/B/C, P Loss Total
+            # ต่อท้าย: V Reg A/B/C, V Loss A/B/C, P Loss A/B/C, P Loss Total
             row_data.extend([
-                v_avg_a, v_avg_b, v_avg_c,
+                v_reg_a, v_reg_b, v_reg_c,
                 v_loss_a, v_loss_b, v_loss_c,
                 p_loss_a, p_loss_b, p_loss_c,
                 p_loss_total,
@@ -497,6 +587,9 @@ class VoltageAnalyzerApp:
 
         # แสดงผลลัพธ์ใน UI
         self.output_path_var.set(output_path)
+        self.r2_a_var.set(f"{r2s['A']:.4f}")
+        self.r2_b_var.set(f"{r2s['B']:.4f}")
+        self.r2_c_var.set(f"{r2s['C']:.4f}")
         self.red_p_loss_var.set(f"{self.red_total_p_loss:.4f}")
         self.green_p_loss_var.set(f"{self.green_total_p_loss:.4f}")
         self.blue_p_loss_var.set(f"{self.blue_total_p_loss:.4f}")
