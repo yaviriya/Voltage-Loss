@@ -39,8 +39,8 @@ class VoltageAnalyzerApp:
         except Exception:
             pass
 
-        # ตัวแปรเก็บพาธของไฟล์ (Voltage, Current, Power Factor, Normal Voltage, Normal Current)
-        self.input_paths = [None, None, None, None, None]
+        # ตัวแปรเก็บพาธของไฟล์ (Voltage, Current, Power Factor, Normal Voltage)
+        self.input_paths = [None, None, None, None]
         self.multiply_factor_var = tk.StringVar(value="30")  # CT Ratio เริ่มต้น 30
 
         # ตัวแปรสำหรับเก็บผลรวมของ P Loss แยกตามสี (Peak / Off-Peak / Holiday)
@@ -55,6 +55,7 @@ class VoltageAnalyzerApp:
 
         # วันหยุดราชการ
         self.holidays = {
+            # --- ปี 2025 ---
             date(2025, 1, 1),
             date(2025, 2, 12),
             date(2025, 4, 7),
@@ -77,6 +78,28 @@ class VoltageAnalyzerApp:
             date(2025, 12, 5),
             date(2025, 12, 10),
             date(2025, 12, 31),
+            # --- ปี 2026 ---
+            date(2026, 1, 1),
+            date(2026, 1, 2),
+            date(2026, 3, 3),
+            date(2026, 4, 6),
+            date(2026, 4, 13),
+            date(2026, 4, 14),
+            date(2026, 4, 15),
+            date(2026, 5, 1),
+            date(2026, 5, 4),
+            date(2026, 5, 13),
+            date(2026, 6, 1),
+            date(2026, 6, 3),
+            date(2026, 7, 28),
+            date(2026, 7, 29),
+            date(2026, 7, 30),
+            date(2026, 8, 12),
+            date(2026, 10, 13),
+            date(2026, 10, 23),
+            date(2026, 12, 7),
+            date(2026, 12, 10),
+            date(2026, 12, 31),
             # ใส่วันอื่น ๆ ตามต้องการ
         }
 
@@ -85,8 +108,8 @@ class VoltageAnalyzerApp:
     def create_widgets(self):
         """สร้าง UI elements"""
         # file_path_vars เก็บตาม index ของ input_paths
-        # (0=Voltage, 1=Current, 2=Power Factor, 3=Normal Voltage, 4=Normal Current)
-        self.file_path_vars = [tk.StringVar() for _ in range(5)]
+        # (0=Voltage, 1=Current, 2=Power Factor, 3=Normal Voltage)
+        self.file_path_vars = [tk.StringVar() for _ in range(4)]
 
         def build_file_rows(parent, items):
             """สร้างแถวเลือกไฟล์: items = [(label, index), ...]"""
@@ -98,7 +121,7 @@ class VoltageAnalyzerApp:
         # เฟรมไฟล์ Normal (ใช้ฝึกโมเดล regression) — อยู่ด้านบน
         normal_frame = ttk.LabelFrame(self.root, text="Normal Files")
         normal_frame.pack(fill="x", padx=10, pady=(10, 20))
-        build_file_rows(normal_frame, [("Normal Voltage", 3), ("Normal Current", 4)])
+        build_file_rows(normal_frame, [("Normal Voltage", 3)])
 
         # เฟรมไฟล์ที่ใช้คำนวณ — อยู่ด้านล่าง (เว้นระยะห่างจากกลุ่ม Normal)
         measure_frame = ttk.LabelFrame(self.root, text="Calculation Files")
@@ -357,17 +380,16 @@ class VoltageAnalyzerApp:
 
         return data, header_row, None
 
-    def compute_v_regression(self, normal_voltage_data, normal_current_data):
+    def compute_v_regression(self, normal_voltage_data):
         """ฝึกโมเดล Linear Regression 3 ตัว (เฟส A, B, C) จากข้อมูลช่วงปกติ
 
-        จับคู่แถวจากไฟล์ Normal Voltage และ Normal Current ตาม datetime ที่ตรงกัน
-        โดยสมมติว่าคอลัมน์ลำดับ 1, 2, 3 ของแต่ละไฟล์คือเฟส A, B, C ตามลำดับ
-        ดังนั้นแต่ละแถวข้อมูลฝึกคือ [V_a, V_b, V_c, I_a, I_b, I_c]
+        ใช้เฉพาะไฟล์ Normal Voltage โดยสมมติว่าคอลัมน์ลำดับ 1, 2, 3
+        คือเฟส A, B, C ตามลำดับ ดังนั้นแต่ละแถวข้อมูลฝึกคือ [V_a, V_b, V_c]
 
         ตัวแปรต้น (X) ของแต่ละเฟส:
-            A: [V_b, V_c, I_a, I_b, I_c]   (ทำนาย V_a)
-            B: [V_a, V_c, I_a, I_b, I_c]   (ทำนาย V_b)
-            C: [V_a, V_b, I_a, I_b, I_c]   (ทำนาย V_c)
+            A: [V_b, V_c]   (ทำนาย V_a)
+            B: [V_a, V_c]   (ทำนาย V_b)
+            C: [V_a, V_b]   (ทำนาย V_c)
 
         คืนค่า (models, r2s):
             models[ph] = LinearRegression ที่ฝึกแล้ว (ph เป็น 'A'/'B'/'C')
@@ -375,28 +397,25 @@ class VoltageAnalyzerApp:
         ถ้าข้อมูลไม่พอจะคืน (None, None)
         """
         rows = []
-        for dt in sorted(set(normal_voltage_data) & set(normal_current_data)):
+        for dt in sorted(normal_voltage_data):
             v = normal_voltage_data[dt]
-            c = normal_current_data[dt]
             try:
                 v_a, v_b, v_c = float(v[1]), float(v[2]), float(v[3])
-                i_a, i_b, i_c = float(c[1]), float(c[2]), float(c[3])
             except (ValueError, TypeError, IndexError):
                 continue
-            rows.append((v_a, v_b, v_c, i_a, i_b, i_c))
+            rows.append((v_a, v_b, v_c))
 
-        # ต้องมีจำนวนแถวมากกว่าจำนวนตัวแปรต้น (5) จึง regression ได้อย่างมีความหมาย
-        if len(rows) <= 5:
+        # ต้องมีจำนวนแถวมากกว่าจำนวนตัวแปรต้น (2) จึง regression ได้อย่างมีความหมาย
+        if len(rows) <= 2:
             return None, None
 
         arr = np.array(rows, dtype=float)
         v_a, v_b, v_c = arr[:, 0], arr[:, 1], arr[:, 2]
-        i_a, i_b, i_c = arr[:, 3], arr[:, 4], arr[:, 5]
 
         feature_map = {
-            'A': np.column_stack([v_b, v_c, i_a, i_b, i_c]),
-            'B': np.column_stack([v_a, v_c, i_a, i_b, i_c]),
-            'C': np.column_stack([v_a, v_b, i_a, i_b, i_c]),
+            'A': np.column_stack([v_b, v_c]),
+            'B': np.column_stack([v_a, v_c]),
+            'C': np.column_stack([v_a, v_b]),
         }
         target_map = {'A': v_a, 'B': v_b, 'C': v_c}
 
@@ -419,9 +438,9 @@ class VoltageAnalyzerApp:
 
     def process_files(self):
         """ประมวลผลไฟล์ Excel ทั้งหมด"""
-        # ตรวจสอบว่าได้เลือกไฟล์ครบทั้ง 5 ไฟล์หรือไม่
+        # ตรวจสอบว่าได้เลือกไฟล์ครบทั้ง 4 ไฟล์หรือไม่
         if None in self.input_paths:
-            messagebox.showerror("Error", "โปรดเลือกให้ครบทั้ง 5 ไฟล์เพื่อทำการคำนวณ")
+            messagebox.showerror("Error", "โปรดเลือกให้ครบทั้ง 4 ไฟล์เพื่อทำการคำนวณ")
             return
 
         try:
@@ -445,21 +464,16 @@ class VoltageAnalyzerApp:
             data, _, _ = result
             all_data.append(data)
 
-        # อ่านไฟล์ Normal Voltage และ Normal Current เพื่อฝึกโมเดล regression
+        # อ่านไฟล์ Normal Voltage เพื่อฝึกโมเดล regression
         normal_volt_result = self.read_excel_data(self.input_paths[3])
         if normal_volt_result is None:
             messagebox.showerror("Error", "ไม่สามารถอ่านไฟล์ Normal Voltage ได้")
             return
-        normal_curr_result = self.read_excel_data(self.input_paths[4])
-        if normal_curr_result is None:
-            messagebox.showerror("Error", "ไม่สามารถอ่านไฟล์ Normal Current ได้")
-            return
         normal_volt_data, _, _ = normal_volt_result
-        normal_curr_data, _, _ = normal_curr_result
 
-        models, r2s = self.compute_v_regression(normal_volt_data, normal_curr_data)
+        models, r2s = self.compute_v_regression(normal_volt_data)
         if models is None:
-            messagebox.showerror("Error", "ข้อมูลช่วงปกติ (Normal Voltage/Current) ไม่พอสำหรับฝึกโมเดล regression")
+            messagebox.showerror("Error", "ข้อมูลช่วงปกติ (Normal Voltage) ไม่พอสำหรับฝึกโมเดล regression")
             return
 
         # รวมข้อมูลจากทั้ง 3 ไฟล์หลัก
@@ -508,6 +522,17 @@ class VoltageAnalyzerApp:
         max_input_index = max(v_a_col, v_b_col, v_c_col, i_a_col, i_b_col, i_c_col, pf_col) - 1
 
         for dt, row_data in sorted(merged_data.items()):
+            # แปลงค่า Power Factor ให้เป็นค่าบวก
+            if len(row_data) > pf_col - 1:
+                pf_value = row_data[pf_col - 1]
+                if pf_value is not None:
+                    try:
+                        pf_float = float(pf_value)
+                        if pf_float < 0:
+                            row_data[pf_col - 1] = abs(pf_float)
+                    except (ValueError, TypeError):
+                        pass
+
             # ดึงค่าจากแถว (None ถ้าไม่ครบ)
             def get_float(idx):
                 if len(row_data) > idx and row_data[idx] is not None:
@@ -527,9 +552,9 @@ class VoltageAnalyzerApp:
 
             # ทำนาย V_regression ของแต่ละเฟสจากตัวแปรต้นของแถวนี้
             # (ลำดับ feature ต้องตรงกับตอนฝึกใน compute_v_regression)
-            v_reg_a = self.predict_v_regression(models['A'], [v_b, v_c, i_a, i_b, i_c])
-            v_reg_b = self.predict_v_regression(models['B'], [v_a, v_c, i_a, i_b, i_c])
-            v_reg_c = self.predict_v_regression(models['C'], [v_a, v_b, i_a, i_b, i_c])
+            v_reg_a = self.predict_v_regression(models['A'], [v_b, v_c])
+            v_reg_b = self.predict_v_regression(models['B'], [v_a, v_c])
+            v_reg_c = self.predict_v_regression(models['C'], [v_a, v_b])
 
             # V Loss ต่อเฟส: ถ้า V < V_reg*0.975 → V_reg*0.975 - V, ไม่งั้น 0
             def calc_v_loss(v, v_reg):
