@@ -508,17 +508,6 @@ class VoltageAnalyzerApp:
         max_input_index = max(v_a_col, v_b_col, v_c_col, i_a_col, i_b_col, i_c_col, pf_col) - 1
 
         for dt, row_data in sorted(merged_data.items()):
-            # แปลงค่า Power Factor ให้เป็นค่าบวก
-            if len(row_data) > pf_col - 1:
-                pf_value = row_data[pf_col - 1]
-                if pf_value is not None:
-                    try:
-                        pf_float = float(pf_value)
-                        if pf_float < 0:
-                            row_data[pf_col - 1] = abs(pf_float)
-                    except (ValueError, TypeError):
-                        pass
-
             # ดึงค่าจากแถว (None ถ้าไม่ครบ)
             def get_float(idx):
                 if len(row_data) > idx and row_data[idx] is not None:
