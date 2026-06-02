@@ -4,24 +4,33 @@
 
 ## เป้าหมายของโปรเจค
 
-สร้าง Desktop App ที่:
-- รับ input ไฟล์ Voltage, Current, Power Factor, Normal Voltage, Normal Current
+สร้าง Desktop App ที่รับ input 5 ไฟล์ — **Voltage, Current, Power Factor, Normal Voltage, Normal Current** — แล้วทำงานตามขั้นตอนดังนี้:
 
-- คำนวณ V_regression ของแต่ละเฟสด้วยวิธีการ Linear Regression
-    - V_regression Phase A หาจาก 
-        - Y range เป็นค่า Voltage Phase A ในช่วงที่ปกติ (Normal) ตั้งแต่บรรทัดแรกจนบรรทัดสุดท้าย
-        - X range เป็นค่าตัวแปรต้นทั้งหมด (ในกรณีนี้คือ Voltage Phase B,Voltage Phase C,Current A,Current B,Current C) ในช่วงที่ปกติตั้งแต่บรรทัดแรกจนบรรทัดสุดท้าย
-    - V_regression Phase B หาจาก 
-        - Y range เป็นค่า Voltage Phase B ในช่วงที่ปกติ (Normal) ตั้งแต่บรรทัดแรกจนบรรทัดสุดท้าย
-        - X range เป็นค่าตัวแปรต้นทั้งหมด (ในกรณีนี้คือ Voltage Phase A,Voltage Phase C,Current A,Current B,Current C) ในช่วงที่ปกติตั้งแต่บรรทัดแรกจนบรรทัดสุดท้าย
-    - V_regression Phase C หาจาก 
-        - Y range เป็นค่า Voltage Phase C ในช่วงที่ปกติ (Normal) ตั้งแต่บรรทัดแรกจนบรรทัดสุดท้าย
-        - X range เป็นค่าตัวแปรต้นทั้งหมด (ในกรณีนี้คือ Voltage Phase A,Voltage Phase B,Current A,Current B,Current C) ในช่วงที่ปกติตั้งแต่บรรทัดแรกจนบรรทัดสุดท้าย
+### 1. Fit โมเดล Linear Regression 3 ตัว (จากข้อมูลช่วง Normal)
 
-- แสดงค่า R-Square ของแต่ละ model V_regression โดยให้มีค่าใกล้ 1 มากที่สุด
-- คำนวณหา V_loss จาก logic ถ้า Voltage < (V_regression*0.975) ให้ใช้ (V_regression*0.975)-Voltage ถ้าไม่ให้เป็น 0 ทำเหมือนกันทั้ง Phase A, Phase B, Phase C
-- คำนวณ P_loss Phase A, Phase B, Phase C จาก (V_loss*Current*Power Factor*CT_Ratio)/4000 ทำแบบเดียวกันทั้ง 3 เฟส
-- คำนวณ P_loss Total จาก P_loss Phase A + P_loss Phase B + P_loss Phase C
+ฝึกโมเดลด้วยไฟล์ Normal Voltage / Normal Current โดยแต่ละเฟสใช้:
+
+| โมเดล | ตัวแปรตาม (Y) | ตัวแปรต้น (X) |
+|-------|---------------|----------------|
+| **Phase A** | Voltage Phase A | Voltage B, Voltage C, Current A, Current B, Current C |
+| **Phase B** | Voltage Phase B | Voltage A, Voltage C, Current A, Current B, Current C |
+| **Phase C** | Voltage Phase C | Voltage A, Voltage B, Current A, Current B, Current C |
+
+> ทุก range ใช้ค่าช่วงปกติ (Normal) ตั้งแต่บรรทัดแรกจนบรรทัดสุดท้าย
+> ผลลัพธ์: ได้ Model 3 ตัว (Voltage Phase A, B, C) พร้อมแสดงค่า **R-Square ทั้ง 3 ค่า** (ยิ่งใกล้ 1 ยิ่งดี)
+
+### 2. Predict V_regression ในช่วง Calculation
+
+นำโมเดลทั้ง 3 มาทำนายค่า V_regression Phase A, B, C ในช่วงการคำนวณ โดยป้อน input จากไฟล์ **Voltage, Current** (ช่วง Calculation)
+
+### 3. คำนวณ V_loss และ P_loss
+
+- **V_loss** (ทำเหมือนกันทั้ง 3 เฟส):
+  ถ้า `Voltage < V_regression(Calculation) × 0.975` → ใช้ `(V_regression(Calculation) × 0.975) − Voltage`
+  ถ้าไม่ → เป็น `0`
+- **P_loss** Phase A, B, C = `(V_loss × Current × Power Factor × CT_Ratio) / 4000`
+- **CT_Ratio** เลือกจาก Radio Button: `100/5 = 20`, `150/5 = 30`, `250/5 = 50`, `400/5 = 80`
+- **P_loss Total** = P_loss Phase A + P_loss Phase B + P_loss Phase C
 
 ## โครงสร้างโปรเจค
 
