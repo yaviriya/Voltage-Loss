@@ -230,13 +230,20 @@ class VoltageAnalyzerApp:
         """โหลดทุกแถวจากไฟล์ Excel เป็น list ของ list (ค่าของแต่ละเซลล์)
 
         เลือก engine ตามนามสกุลไฟล์:
-        - .xls            → xlrd (รูปแบบเก่า)
+        - .xls            → xlrd (รูปแบบเก่า) หรือ HTML table ถ้าไฟล์จริงเป็น HTML
         - .xlsx / .xlsm   → openpyxl (รูปแบบใหม่)
         เซลล์ชนิดวันที่ใน .xls จะถูกแปลงเป็นข้อความ dd/mm/yyyy HH.MM
         เพื่อให้ตัวอ่านวันที่ (ที่ออกแบบไว้สำหรับข้อความ) ใช้งานได้
         """
         ext = os.path.splitext(file_path)[1].lower()
         if ext == ".xls":
+            # บางระบบ (เช่น PEA AMI) export เป็น HTML table แต่ตั้งนามสกุล .xls
+            # ตรวจจากไบต์แรก: ถ้าเริ่มด้วย '<' ให้อ่านแบบ HTML แทน xlrd
+            with open(file_path, "rb") as f:
+                head = f.read(512).lstrip(b"\xef\xbb\xbf").lstrip()
+            if head[:1] == b"<":
+                return self._load_html_rows(file_path)
+
             import xlrd
             book = xlrd.open_workbook(file_path)
             sheet = book.sheet_by_index(0)
@@ -256,6 +263,45 @@ class VoltageAnalyzerApp:
         wb = openpyxl.load_workbook(file_path)
         ws = wb.active
         return [list(row) for row in ws.iter_rows(values_only=True)]
+
+    def _load_html_rows(self, file_path):
+        """อ่านไฟล์ .xls ที่จริง ๆ เป็น HTML table (export จากระบบ PEA AMI)
+
+        คืนค่าเป็น list ของ list เหมือน load_rows ปกติ โดยดึงทุกแถว <tr>
+        และค่าในแต่ละ <td>/<th> เป็นข้อความที่ strip แล้ว
+        """
+        from html.parser import HTMLParser
+
+        class _TableParser(HTMLParser):
+            def __init__(self):
+                super().__init__(convert_charrefs=True)
+                self.rows = []
+                self.cur = None
+                self.cell = None
+
+            def handle_starttag(self, tag, attrs):
+                if tag == "tr":
+                    self.cur = []
+                elif tag in ("td", "th") and self.cur is not None:
+                    self.cell = []
+
+            def handle_data(self, data):
+                if self.cell is not None:
+                    self.cell.append(data)
+
+            def handle_endtag(self, tag):
+                if tag in ("td", "th") and self.cell is not None:
+                    self.cur.append("".join(self.cell).replace("\xa0", "").strip())
+                    self.cell = None
+                elif tag == "tr" and self.cur is not None:
+                    self.rows.append(self.cur)
+                    self.cur = None
+
+        with open(file_path, encoding="utf-8", errors="replace") as f:
+            html = f.read()
+        parser = _TableParser()
+        parser.feed(html)
+        return parser.rows
 
     def read_excel_data(self, file_path):
         """อ่านข้อมูลจากไฟล์ Excel (รองรับทั้ง .xlsx และ .xls)"""
