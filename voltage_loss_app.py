@@ -522,20 +522,6 @@ class VoltageAnalyzerApp:
             messagebox.showerror("Error", "ข้อมูลช่วงปกติ (Normal Voltage) ไม่พอสำหรับฝึกโมเดล regression")
             return
 
-        # เตรียมแรงดันช่วง Normal เรียงตามเวลา เพื่อใช้เป็น input ของการทำนาย
-        # (จับคู่กับแถว Calculation ตามลำดับแถว row i <-> row i; ถ้าแถว calc มากกว่า
-        #  จะวน normal กลับไปเริ่มใหม่แบบ modulo ให้ทุกแถว calc มี input ครบ)
-        def _to_float(x):
-            try:
-                return float(x)
-            except (ValueError, TypeError):
-                return None
-
-        normal_v_rows = [
-            tuple(_to_float(v[k]) if len(v) > k else None for k in (1, 2, 3))
-            for dt, v in sorted(normal_volt_data.items())
-        ]
-
         # รวมข้อมูลจากทั้ง 3 ไฟล์หลัก
         merged_data = defaultdict(list)
         for dt in sorted(set().union(*[d.keys() for d in all_data])):
@@ -581,7 +567,7 @@ class VoltageAnalyzerApp:
 
         max_input_index = max(v_a_col, v_b_col, v_c_col, i_a_col, i_b_col, i_c_col, pf_col) - 1
 
-        for idx, (dt, row_data) in enumerate(sorted(merged_data.items())):
+        for dt, row_data in sorted(merged_data.items()):
             # แปลงค่า Power Factor ให้เป็นค่าบวก
             if len(row_data) > pf_col - 1:
                 pf_value = row_data[pf_col - 1]
@@ -610,20 +596,18 @@ class VoltageAnalyzerApp:
             i_c = get_float(i_c_col - 1)
             pf = get_float(pf_col - 1)
 
-            # ทำนาย V_regression ของแต่ละเฟส โดยป้อนแรงดันช่วง Normal ของแถวลำดับเดียวกัน
-            # (จับคู่ตามลำดับแถว; ถ้าแถว calc เกินจำนวนแถว normal จะวน normal กลับไปเริ่มใหม่)
-            # ลำดับ feature ต้องตรงกับตอนฝึกใน compute_v_regression
-            nv_a, nv_b, nv_c = normal_v_rows[idx % len(normal_v_rows)]
-            v_reg_a = self.predict_v_regression(models['A'], [nv_b, nv_c])
-            v_reg_b = self.predict_v_regression(models['B'], [nv_a, nv_c])
-            v_reg_c = self.predict_v_regression(models['C'], [nv_a, nv_b])
+            # ทำนาย V_regression ของแต่ละเฟสจากตัวแปรต้นของแถวนี้
+            # (ลำดับ feature ต้องตรงกับตอนฝึกใน compute_v_regression)
+            v_reg_a = self.predict_v_regression(models['A'], [v_b, v_c])
+            v_reg_b = self.predict_v_regression(models['B'], [v_a, v_c])
+            v_reg_c = self.predict_v_regression(models['C'], [v_a, v_b])
 
-            # V Loss ต่อเฟส: ถ้า V < V_reg*0.975 → V_reg - V, ไม่งั้น 0
+            # V Loss ต่อเฟส: ถ้า V < V_reg*0.975 → V_reg*0.975 - V, ไม่งั้น 0
             def calc_v_loss(v, v_reg):
                 if v is None or v_reg is None:
                     return 0.0
                 threshold = v_reg * 0.975
-                return v_reg - v if v < threshold else 0.0
+                return threshold - v if v < threshold else 0.0
 
             v_loss_a = calc_v_loss(v_a, v_reg_a)
             v_loss_b = calc_v_loss(v_b, v_reg_b)

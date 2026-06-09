@@ -21,22 +21,12 @@
 
 ### 2. Predict V_regression ในช่วง Calculation
 
-นำโมเดลทั้ง 3 มาทำนายค่า V_regression Phase A, B, C สำหรับแต่ละแถวของช่วง Calculation โดย **ป้อน input เป็นค่าแรงดันจากไฟล์ Normal Voltage** (ไม่ใช่ค่าแรงดันของช่วง Calculation):
-
-- `V_reg_A = predict(V_b normal, V_c normal)`
-- `V_reg_B = predict(V_a normal, V_c normal)`
-- `V_reg_C = predict(V_a normal, V_b normal)`
-
-> **การจับคู่แถว:** แถว Calculation ลำดับที่ `i` ใช้ค่าแรงดันจากไฟล์ Normal แถวลำดับที่ `i` (เรียงตามเวลา row i ↔ row i)
-> - ถ้าแถว Calc **น้อยกว่า** Normal → แถว Normal ส่วนเกินถูกข้ามไป
-> - ถ้าแถว Calc **มากกว่า** Normal → วน Normal กลับไปเริ่มแถวแรกใหม่แบบ modulo (`idx % len`) ให้ทุกแถว Calc มี input ครบ ไม่พัง
-
-ส่วนไฟล์ Current ไม่ใช้ในการทำนาย แต่นำไปใช้ในการคำนวณ P_loss เท่านั้น
+นำโมเดลทั้ง 3 มาทำนายค่า V_regression Phase A, B, C ในช่วงการคำนวณ โดยป้อน input จากไฟล์ **Voltage** อย่างเดียว (ช่วง Calculation) — ส่วนไฟล์ Current ไม่ใช้ในการทำนาย แต่นำไปใช้ในการคำนวณ P_loss เท่านั้น
 
 ### 3. คำนวณ V_loss และ P_loss
 
 - **V_loss** (ทำเหมือนกันทั้ง 3 เฟส):
-  ถ้า `Voltage < V_regression × 0.975` → ใช้ `V_regression − Voltage`
+  ถ้า `Voltage < V_regression(Calculation) × 0.975` → ใช้ `(V_regression(Calculation) × 0.975) − Voltage`
   ถ้าไม่ → เป็น `0`
 - **P_loss** Phase A, B, C = `(V_loss × Current × Power Factor × CT_Ratio) / 4000`
 - **CT_Ratio** เลือกจาก Radio Button: `100/5 = 20`, `150/5 = 30`, `250/5 = 50`, `400/5 = 80`
@@ -100,21 +90,11 @@ pyinstaller --onefile --windowed --name VoltageLoss --icon "logo/wave.ico" --add
 > ต้อง `--exclude-module` พวก torch/cuda/pandas/matplotlib ที่ติดตั้งในเครื่อง ไม่งั้น PyInstaller จะดูดมาด้วยจนไฟล์บวมถึง ~2.4 GB (ตัดออกแล้วเหลือ ~75 MB)
 > ได้ไฟล์ที่ `dist\VoltageLoss.exe` — ส่งไฟล์เดียวไปเปิดเครื่องอื่นได้เลย ไม่ต้องติดตั้ง Python
 
-**สร้าง GitHub Release ให้คนอื่นดาวน์โหลด `.exe`:**
-ไฟล์ `.exe` ~75 MB ถูก gitignore อยู่แล้ว — แจกผ่าน Release ไม่ใช่ commit เข้า repo
-```powershell
-gh release create v1.0.0 "dist\VoltageLoss.exe" --title "VoltageLoss v1.0.0" --notes "รายละเอียดเวอร์ชัน"
-```
-> ต้องมี `gh` CLI + login ก่อน (`gh auth login` แบบ Login with a web browser)
-> ลิงก์โหลดตรงเวอร์ชันล่าสุด: `https://github.com/yaviriya/Voltage-Loss/releases/latest/download/VoltageLoss.exe`
-> ครั้งหน้าอัปเวอร์ชันใหม่แค่เปลี่ยน tag (เช่น `v1.1.0`) — ลิงก์ `latest` จะชี้ตามอัตโนมัติ
-
 ## Environment ที่ติดตั้งไว้
 
 - Python 3.12 (`C:\Users\amari\AppData\Local\Programs\Python\Python312`)
 - numpy 1.26.4, scikit-learn 1.5.2, scipy 1.14.1, openpyxl 3.1.5, xlrd 2.0.2
 - PyInstaller 6.12.0
-- GitHub CLI (`gh`) 2.93.0 — ติดตั้งที่ `C:\Program Files\GitHub CLI\` (login บัญชี yaviriya แล้ว)
 - หมายเหตุ: เครื่องนี้มี torch (cu121), pandas, matplotlib, opencv ติดตั้งอยู่ด้วย แต่แอปนี้ไม่ได้ใช้ (ต้อง exclude ตอน build)
 
 ## Core Principles
