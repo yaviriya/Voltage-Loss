@@ -602,12 +602,12 @@ class VoltageAnalyzerApp:
             v_reg_b = self.predict_v_regression(models['B'], [v_a, v_c])
             v_reg_c = self.predict_v_regression(models['C'], [v_a, v_b])
 
-            # V Loss ต่อเฟส: ถ้า V < V_reg*0.975 → V_reg*0.975 - V, ไม่งั้น 0
+            # V Loss ต่อเฟส: ถ้า V < V_reg*0.975 → V_reg - V, ไม่งั้น 0
             def calc_v_loss(v, v_reg):
                 if v is None or v_reg is None:
                     return 0.0
                 threshold = v_reg * 0.975
-                return threshold - v if v < threshold else 0.0
+                return v_reg - v if v < threshold else 0.0
 
             v_loss_a = calc_v_loss(v_a, v_reg_a)
             v_loss_b = calc_v_loss(v_b, v_reg_b)

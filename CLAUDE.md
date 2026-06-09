@@ -26,7 +26,7 @@
 ### 3. คำนวณ V_loss และ P_loss
 
 - **V_loss** (ทำเหมือนกันทั้ง 3 เฟส):
-  ถ้า `Voltage < V_regression(Calculation) × 0.975` → ใช้ `(V_regression(Calculation) × 0.975) − Voltage`
+  ถ้า `Voltage < V_regression(Calculation) × 0.975` → ใช้ `V_regression(Calculation) − Voltage`
   ถ้าไม่ → เป็น `0`
 - **P_loss** Phase A, B, C = `(V_loss × Current × Power Factor × CT_Ratio) / 4000`
 - **CT_Ratio** เลือกจาก Radio Button: `100/5 = 20`, `150/5 = 30`, `250/5 = 50`, `400/5 = 80`
